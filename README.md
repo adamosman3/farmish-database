@@ -55,7 +55,10 @@ One-time setup on the Farmish side:
 
 1. Register an OAuth application at `<farmish>/oauth/applications` (or via console):
    - Redirect URI: `<APP_URL>/api/auth/callback` (one per environment)
-   - Scopes: `public`, Confidential: yes
+   - Scopes: `public admin`, Confidential: yes
+   (`admin` must also be listed in Doorkeeper's `optional_scopes` in Farmish's
+   `config/initializers/doorkeeper.rb`, or the authorize request is rejected
+   with `invalid_scope`.)
    Copy the UID/secret into `FARMISH_CLIENT_ID` / `FARMISH_CLIENT_SECRET`.
 2. Expose the admin flag in `GET /api/me` (`API::UsersController`) by adding `admin: current_resource_owner.admin?` to the JSON. Until that field is present, all sign-ins are rejected as non-admin — the safe default.
 

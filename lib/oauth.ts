@@ -68,7 +68,7 @@ export function authorizeUrl(state: string, codeChallenge: string): string {
     client_id: clientId(),
     redirect_uri: redirectUri(),
     response_type: "code",
-    scope: "public",
+    scope: "public admin",
     state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",

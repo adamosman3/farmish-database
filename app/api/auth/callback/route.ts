@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { exchangeCode, fetchCurrentUser, revokeToken } from "@/lib/oauth";
+import {
+  absoluteUrl,
+  exchangeCode,
+  fetchCurrentUser,
+  revokeToken,
+} from "@/lib/oauth";
 
 export async function GET(request: NextRequest) {
   const session = await getSession();
@@ -16,7 +21,7 @@ export async function GET(request: NextRequest) {
 
   const loginWithError = async (error: string) => {
     await session.save();
-    return NextResponse.redirect(new URL(`/login?error=${error}`, request.url));
+    return NextResponse.redirect(absoluteUrl(`/login?error=${error}`));
   };
 
   if (params.get("error")) {
@@ -39,7 +44,7 @@ export async function GET(request: NextRequest) {
     if (user.admin !== true) {
       await revokeToken(accessToken).catch(() => {});
       session.destroy();
-      return NextResponse.redirect(new URL("/login?error=not_admin", request.url));
+      return NextResponse.redirect(absoluteUrl("/login?error=not_admin"));
     }
 
     session.user = {
@@ -50,7 +55,7 @@ export async function GET(request: NextRequest) {
     };
     session.accessToken = accessToken;
     await session.save();
-    return NextResponse.redirect(new URL("/", request.url));
+    return NextResponse.redirect(absoluteUrl("/"));
   } catch (error) {
     console.error("OAuth callback failed:", error);
     await revokeToken(accessToken).catch(() => {});

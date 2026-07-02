@@ -43,6 +43,13 @@ export function redirectUri(): string {
   return `${appUrl()}/api/auth/callback`;
 }
 
+// Absolute URL on this app's public host. Route handlers can't build these
+// from request.url: Next's standalone server rewrites it to the internal
+// bind address (e.g. https://0.0.0.0:3000) behind a proxy.
+export function absoluteUrl(path: string): string {
+  return `${appUrl()}${path}`;
+}
+
 function base64url(bytes: Uint8Array): string {
   return Buffer.from(bytes)
     .toString("base64")

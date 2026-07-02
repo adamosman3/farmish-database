@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { revokeToken } from "@/lib/oauth";
+import { absoluteUrl, revokeToken } from "@/lib/oauth";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const session = await getSession();
   const accessToken = session.accessToken;
   session.destroy();
@@ -13,5 +13,5 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  return NextResponse.redirect(new URL("/login", request.url));
+  return NextResponse.redirect(absoluteUrl("/login"));
 }

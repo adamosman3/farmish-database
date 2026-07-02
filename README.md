@@ -43,7 +43,7 @@ A Next.js (App Router) dashboard that unifies live data from **Postgres**, **Amp
 
 ## Deployment
 
-The app is deployed on [Fly.io](https://fly.io) as `farmish-admin-dashboard` in the **farmish** organization, at [farmish-admin-dashboard.fly.dev](https://farmish-admin-dashboard.fly.dev). It builds via the `Dockerfile` (Next.js standalone output) and is configured in `fly.toml`. Machines auto-stop when idle and auto-start on request.
+The app is deployed on [Fly.io](https://fly.io) as `farmish-admin-dashboard` in the **farmish** organization, at [admin-dashboard.getfarmish.com](https://admin-dashboard.getfarmish.com). It builds via the `Dockerfile` (Next.js standalone output) and is configured in `fly.toml`. Machines auto-stop when idle and auto-start on request.
 
 Deploy with:
 

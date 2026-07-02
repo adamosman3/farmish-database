@@ -43,7 +43,15 @@ A Next.js (App Router) dashboard that unifies live data from **Postgres**, **Amp
 
 ## Deployment
 
-The app uses the Node `pg` driver with a long-lived connection pool (`lib/db.ts`). To deploy on Cloudflare's edge runtime, either use a Postgres provider with a serverless HTTP driver (e.g. Neon) or place Cloudflare Hyperdrive in front of the database. Amplitude and HubSpot calls are plain `fetch` and work on the edge as-is. Alternatively, host on any Node platform and put Cloudflare in front for DNS/CDN.
+The app is deployed on [Fly.io](https://fly.io) as `farmish-admin-dashboard` in the **farmish** organization, at [admin-dashboard.getfarmish.com](https://admin-dashboard.getfarmish.com). It builds via the `Dockerfile` (Next.js standalone output) and is configured in `fly.toml`. Machines auto-stop when idle and auto-start on request.
+
+Deploy with:
+
+```bash
+fly deploy
+```
+
+Environment variables are stored as Fly secrets (`fly secrets set NAME=value`): `POSTGRES_URL`, `HUBSPOT_TOKEN`, `AMPLITUDE_API_KEY`, and `AMPLITUDE_SECRET_KEY`.
 
 ## Project Structure
 

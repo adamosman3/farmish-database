@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getTableNames, getTableRowCount, getRecentRows } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const tables = await getTableNames(20);

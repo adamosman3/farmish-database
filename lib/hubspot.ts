@@ -1,3 +1,5 @@
+import { withDurableCache, CachedResult } from "./cache";
+
 const HUBSPOT_TOKEN = process.env.HUBSPOT_TOKEN;
 const BASE = "https://api.hubapi.com";
 
@@ -8,7 +10,7 @@ function authHeaders(): HeadersInit {
   };
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 20000): Promise<Response> {
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 15000): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -16,6 +18,36 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 2
   } finally {
     clearTimeout(timeout);
   }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Retry transient failures (rate limits, 5xx, timeouts/aborts) with backoff.
+// HubSpot's Search API has a strict per-second rate limit; without retries,
+// a single 429 fails the whole contacts/companies/emails widget.
+async function fetchWithRetry(url: string, options: RequestInit, attempts = 3): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url, options);
+      if (res.status === 429 || res.status >= 500) {
+        lastErr = new Error(`HubSpot transient error: ${res.status}`);
+        if (attempt < attempts - 1) {
+          await sleep(500 * Math.pow(2, attempt));
+          continue;
+        }
+        return res;
+      }
+      return res;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < attempts - 1) {
+        await sleep(500 * Math.pow(2, attempt));
+        continue;
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("HubSpot request failed after retries");
 }
 
 function requireToken() {
@@ -63,7 +95,7 @@ async function searchCount(objectType: string, sinceMs?: number): Promise<number
     body.filterGroups = [];
   }
 
-  const res = await fetchWithTimeout(`${BASE}/crm/v3/objects/${objectType}/search`, {
+  const res = await fetchWithRetry(`${BASE}/crm/v3/objects/${objectType}/search`, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify(body),
@@ -77,7 +109,7 @@ async function searchCount(objectType: string, sinceMs?: number): Promise<number
 }
 
 async function recentRecords(objectType: string, properties: string[], limit = 10): Promise<CrmRecord[]> {
-  const res = await fetchWithTimeout(`${BASE}/crm/v3/objects/${objectType}/search`, {
+  const res = await fetchWithRetry(`${BASE}/crm/v3/objects/${objectType}/search`, {
     method: "POST",
     headers: authHeaders(),
     body: JSON.stringify({
@@ -106,12 +138,25 @@ async function objectSummary(objectType: string, properties: string[]): Promise<
   return { total, createdThisWeek, createdThisMonth, recent };
 }
 
-export async function getContactsSummary(): Promise<ObjectSummary> {
+async function getContactsSummaryLive(): Promise<ObjectSummary> {
   return objectSummary("contacts", ["email", "firstname", "lastname", "createdate", "lifecyclestage"]);
 }
 
-export async function getCompaniesSummary(): Promise<ObjectSummary> {
+async function getCompaniesSummaryLive(): Promise<ObjectSummary> {
   return objectSummary("companies", ["name", "domain", "city", "state", "createdate", "industry"]);
+}
+
+// Durable cache with stale-on-error fallback: if HubSpot rate-limits or times
+// out, the dashboard serves the last successfully fetched summary instead of
+// an error.
+const DURABLE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+export function getContactsSummaryCached(): Promise<CachedResult<ObjectSummary>> {
+  return withDurableCache("hubspot:contacts:summary", DURABLE_TTL_MS, getContactsSummaryLive);
+}
+
+export function getCompaniesSummaryCached(): Promise<CachedResult<ObjectSummary>> {
+  return withDurableCache("hubspot:companies:summary", DURABLE_TTL_MS, getCompaniesSummaryLive);
 }
 
 // ---- Marketing email performance (by subject line) ----------------------
@@ -162,7 +207,7 @@ async function mapWithConcurrency<T, R>(
 }
 
 async function listMarketingEmails(limit: number): Promise<HubspotEmail[]> {
-  const res = await fetchWithTimeout(`${BASE}/marketing/v3/emails?limit=${limit}`, {
+  const res = await fetchWithRetry(`${BASE}/marketing/v3/emails?limit=${limit}`, {
     headers: authHeaders(),
   });
   if (!res.ok) {
@@ -189,7 +234,7 @@ async function fetchEmailStats(
     `&endTimestamp=${encodeURIComponent(endIso)}` +
     `&emailIds=${encodeURIComponent(emailId)}`;
 
-  const res = await fetchWithTimeout(url, { headers: authHeaders() });
+  const res = await fetchWithRetry(url, { headers: authHeaders() });
   if (!res.ok) return {};
   const json = await res.json();
   // Per-email totals are returned in aggregate.counters for the filtered id.
@@ -200,7 +245,7 @@ async function fetchEmailStats(
  * Lists marketing emails with per-email performance (by subject line).
  * Requires the `content` scope. Emails with no sends report zeros.
  */
-export async function getEmailPerformance(limit = 100): Promise<EmailPerformance[]> {
+async function getEmailPerformanceLive(limit = 100): Promise<EmailPerformance[]> {
   requireToken();
 
   const emails = await listMarketingEmails(limit);
@@ -234,4 +279,10 @@ export async function getEmailPerformance(limit = 100): Promise<EmailPerformance
 
   // Sort by sent volume so emails with activity surface first.
   return results.sort((a, b) => b.sent - a.sent);
+}
+
+export function getEmailPerformanceCached(limit = 100): Promise<CachedResult<EmailPerformance[]>> {
+  return withDurableCache(`hubspot:emails:performance:${limit}`, DURABLE_TTL_MS, () =>
+    getEmailPerformanceLive(limit)
+  );
 }

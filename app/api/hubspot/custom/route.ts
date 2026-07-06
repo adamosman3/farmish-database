@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getHubspotCatalogOptions, runHubspotCustomQuery } from "@/lib/hubspot-custom";
+import { getHubspotCatalogOptions, runHubspotCustomQueryCached } from "@/lib/hubspot-custom";
 
 export const dynamic = "force-dynamic";
 
@@ -11,13 +11,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ catalog: getHubspotCatalogOptions() });
     }
 
-    const result = await runHubspotCustomQuery({
+    const { value, stale, updatedAt } = await runHubspotCustomQueryCached({
       group: searchParams.get("group") ?? "",
       metric: searchParams.get("metric") ?? "count",
       dimension: searchParams.get("dimension") ?? "none",
       range: searchParams.get("range") ?? "30d",
     });
-    return NextResponse.json(result);
+    return NextResponse.json({ ...value, stale, updatedAt: updatedAt.toISOString() });
   } catch (error) {
     console.error("HubSpot custom metrics API error:", error);
     return NextResponse.json(

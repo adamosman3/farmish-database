@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { MetricCard } from "./metric-card";
 import { ChartCard } from "./chart-card";
+import { DayRangeSelect } from "./day-range-select";
 
 interface TimeBucket {
   date: string;
@@ -71,11 +72,13 @@ export function EngagementAnalytics() {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [trendDays, setTrendDays] = useState(30);
 
   useEffect(() => {
     async function load() {
+      setLoading(true);
       try {
-        const res = await fetch("/api/analytics");
+        const res = await fetch(`/api/analytics?days=${trendDays}`);
         const json = (await res.json()) as AnalyticsData;
         if (!res.ok) throw new Error(json.error ?? "Request failed");
         setData(json);
@@ -86,7 +89,7 @@ export function EngagementAnalytics() {
       }
     }
     void load();
-  }, []);
+  }, [trendDays]);
 
   if (error) {
     return (
@@ -120,7 +123,10 @@ export function EngagementAnalytics() {
         <MetricCard title="Avg Msgs / Conversation" value={loading ? "…" : (m?.avgMessagesPerConversation ?? 0).toLocaleString()} icon={Activity} color="green" />
       </div>
 
-      <ChartCard title="Messages Sent (Last 30 Days)">
+      <ChartCard
+        title="Messages Sent"
+        action={<DayRangeSelect value={trendDays} onChange={setTrendDays} />}
+      >
         {loading ? (
           <div className="flex h-72 items-center justify-center text-gray-500">Loading messages...</div>
         ) : (
@@ -147,7 +153,10 @@ export function EngagementAnalytics() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartCard title="New Signups (Last 30 Days)">
+        <ChartCard
+          title="New Signups"
+          action={<DayRangeSelect value={trendDays} onChange={setTrendDays} />}
+        >
           {loading ? (
             <div className="flex h-72 items-center justify-center text-gray-500">Loading signups...</div>
           ) : (

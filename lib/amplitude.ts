@@ -1,3 +1,5 @@
+import { withDurableCache, CachedResult } from "./cache";
+
 const AMPLITUDE_API_KEY = process.env.AMPLITUDE_API_KEY;
 const AMPLITUDE_SECRET_KEY = process.env.AMPLITUDE_SECRET_KEY;
 
@@ -33,7 +35,7 @@ function toCompactDate(input: string): string {
   return input.replace(/-/g, "").slice(0, 8);
 }
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 30000): Promise<Response> {
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 15000): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -41,6 +43,36 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 3
   } finally {
     clearTimeout(timeout);
   }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Retry transient failures (rate limits, 5xx, timeouts/aborts) with backoff.
+// Amplitude's API can be flaky under load; without this, a single blip fails
+// the whole dashboard fetch.
+async function fetchWithRetry(url: string, options: RequestInit, attempts = 3): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const res = await fetchWithTimeout(url, options);
+      if (res.status === 429 || res.status >= 500) {
+        lastErr = new Error(`Amplitude transient error: ${res.status}`);
+        if (attempt < attempts - 1) {
+          await sleep(500 * Math.pow(2, attempt));
+          continue;
+        }
+        return res;
+      }
+      return res;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < attempts - 1) {
+        await sleep(500 * Math.pow(2, attempt));
+        continue;
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("Amplitude request failed after retries");
 }
 
 interface SegmentationResponse {
@@ -70,7 +102,7 @@ async function segmentation(
   url.searchParams.set("m", metric);
   url.searchParams.set("i", String(interval));
 
-  const response = await fetchWithTimeout(url.toString(), {
+  const response = await fetchWithRetry(url.toString(), {
     headers: { Authorization: authHeader(), Accept: "application/json" },
   });
 
@@ -88,7 +120,7 @@ export async function fetchAmplitudeEventDefinitions(): Promise<AmplitudeEventDe
     throw new Error("AMPLITUDE_API_KEY and AMPLITUDE_SECRET_KEY must be configured");
   }
 
-  const response = await fetchWithTimeout("https://amplitude.com/api/2/events/list", {
+  const response = await fetchWithRetry("https://amplitude.com/api/2/events/list", {
     headers: { Authorization: authHeader(), Accept: "application/json" },
   });
 
@@ -183,4 +215,27 @@ export async function fetchAmplitudeVolume(
   const value: AmplitudeVolume = { total, daily, topEvents };
   volumeCache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, value });
   return value;
+}
+
+// Durable, cross-instance cache with stale-on-error fallback. If a live
+// Amplitude fetch fails or times out (this endpoint makes ~1 call per active
+// event type, so it's the most timeout-prone data source in the app), the
+// dashboard serves the last successfully fetched volume instead of an error.
+const DURABLE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+export async function getAmplitudeVolumeCached(
+  days: number,
+  topEventLimit = 10
+): Promise<CachedResult<AmplitudeVolume>> {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - (days - 1));
+  const startStr = start.toISOString().split("T")[0];
+  const endStr = end.toISOString().split("T")[0];
+
+  return withDurableCache(
+    `amplitude:volume:v1:${days}:${topEventLimit}`,
+    DURABLE_TTL_MS,
+    () => fetchAmplitudeVolume(startStr, endStr, topEventLimit)
+  );
 }

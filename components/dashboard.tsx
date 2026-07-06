@@ -15,6 +15,7 @@ import {
 import { Database, Activity, TrendingUp, AlertCircle, RefreshCw } from "lucide-react";
 import { MetricCard } from "./metric-card";
 import { ChartCard } from "./chart-card";
+import { DayRangeSelect } from "./day-range-select";
 
 interface PostgresTable {
   name: string;
@@ -41,6 +42,8 @@ interface AmplitudeData {
   total: number;
   daily: EventVolumePoint[];
   topEvents: EventTotal[];
+  stale?: boolean;
+  updatedAt?: string;
   error?: string;
 }
 
@@ -52,6 +55,7 @@ export function Dashboard() {
   const [pgError, setPgError] = useState<string | null>(null);
   const [ampError, setAmpError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [trendDays, setTrendDays] = useState(30);
 
   async function loadPostgres() {
     setPgLoading(true);
@@ -68,11 +72,11 @@ export function Dashboard() {
     }
   }
 
-  async function loadAmplitude() {
+  async function loadAmplitude(days: number) {
     setAmpLoading(true);
     setAmpError(null);
     try {
-      const res = await fetch("/api/amplitude");
+      const res = await fetch(`/api/amplitude?days=${days}`);
       const data = (await res.json()) as AmplitudeData;
       if (!res.ok) throw new Error(data.error ?? "Amplitude request failed");
       setAmplitude(data);
@@ -85,13 +89,19 @@ export function Dashboard() {
 
   function loadAll() {
     void loadPostgres();
-    void loadAmplitude();
+    void loadAmplitude(trendDays);
     setLastRefresh(new Date());
   }
 
   useEffect(() => {
-    loadAll();
+    void loadPostgres();
+    setLastRefresh(new Date());
   }, []);
+
+  useEffect(() => {
+    void loadAmplitude(trendDays);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trendDays]);
 
   const isLoading = pgLoading || ampLoading;
 
@@ -121,6 +131,11 @@ export function Dashboard() {
             <p className="text-sm text-gray-500">Last refreshed: {lastRefresh.toLocaleTimeString()}</p>
           )}
           {(pgError || ampError) && <p className="text-sm text-red-600">Some data sources failed to load.</p>}
+          {amplitude?.stale && (
+            <p className="text-sm text-amber-600">
+              Showing cached Amplitude data from {new Date(amplitude.updatedAt ?? "").toLocaleString()}.
+            </p>
+          )}
         </div>
         <button
           onClick={loadAll}
@@ -135,7 +150,7 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard title="Postgres Tables" value={postgres?.tables.length ?? "—"} icon={Database} color="green" />
         <MetricCard title="Total Rows" value={postgres ? totalRows.toLocaleString() : "—"} icon={Database} color="blue" />
-        <MetricCard title="Events (30d)" value={amplitude ? totalEvents.toLocaleString() : "—"} icon={Activity} color="amber" />
+        <MetricCard title="Events" value={amplitude ? totalEvents.toLocaleString() : "—"} icon={Activity} color="amber" />
         <MetricCard title="Active Event Types" value={amplitude ? uniqueEventTypes : "—"} icon={TrendingUp} color="green" />
       </div>
 
@@ -152,7 +167,10 @@ export function Dashboard() {
         </div>
       )}
 
-      <ChartCard title="Event Volume (Last 30 Days)">
+      <ChartCard
+        title="Event Volume"
+        action={<DayRangeSelect value={trendDays} onChange={setTrendDays} />}
+      >
         {ampLoading ? (
           <div className="flex h-72 items-center justify-center text-gray-500">Loading Amplitude volume...</div>
         ) : dailyVolumeData.length === 0 ? (
@@ -249,7 +267,7 @@ export function Dashboard() {
         )}
       </ChartCard>
 
-      <ChartCard title="Top Events (Last 30 Days)" className="lg:col-span-2">
+      <ChartCard title="Top Events" className="lg:col-span-2">
         {ampLoading ? (
           <div className="flex h-32 items-center justify-center text-gray-500">Loading Amplitude events...</div>
         ) : (amplitude?.topEvents ?? []).length === 0 ? (
@@ -263,7 +281,7 @@ export function Dashboard() {
                     Event Name
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Total Count (30d)
+                    Total Count
                   </th>
                 </tr>
               </thead>

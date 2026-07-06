@@ -37,7 +37,7 @@ export interface UserAnalytics {
   byState: LabeledCount[];
 }
 
-export async function getMessageAnalytics(): Promise<MessageAnalytics> {
+export async function getMessageAnalytics(trendDays = 30): Promise<MessageAnalytics> {
   const summaryRows = await query<{
     total: string;
     today: string;
@@ -63,8 +63,9 @@ export async function getMessageAnalytics(): Promise<MessageAnalytics> {
   const trendRows = await query<{ day: string; count: string }>(
     `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day, COUNT(*) AS count
      FROM messages
-     WHERE created_at >= CURRENT_DATE - 29 * INTERVAL '1 day'
-     GROUP BY 1 ORDER BY 1`
+     WHERE created_at >= CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day'
+     GROUP BY 1 ORDER BY 1`,
+    [trendDays]
   );
 
   const total = parseInt(s?.total ?? "0", 10);
@@ -85,7 +86,7 @@ export async function getMessageAnalytics(): Promise<MessageAnalytics> {
   };
 }
 
-export async function getUserAnalytics(): Promise<UserAnalytics> {
+export async function getUserAnalytics(trendDays = 30): Promise<UserAnalytics> {
   const summaryRows = await query<{
     total: string;
     new_today: string;
@@ -112,8 +113,9 @@ export async function getUserAnalytics(): Promise<UserAnalytics> {
   const signupTrend = await query<{ day: string; count: string }>(
     `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day, COUNT(*) AS count
      FROM users
-     WHERE created_at >= CURRENT_DATE - 29 * INTERVAL '1 day'
-     GROUP BY 1 ORDER BY 1`
+     WHERE created_at >= CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day'
+     GROUP BY 1 ORDER BY 1`,
+    [trendDays]
   );
 
   const byRole = await query<{ label: string | null; count: string }>(

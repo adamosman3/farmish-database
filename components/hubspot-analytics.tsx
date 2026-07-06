@@ -25,6 +25,8 @@ interface ObjectSummary {
   createdThisWeek: number;
   createdThisMonth: number;
   recent: CrmRecord[];
+  stale?: boolean;
+  updatedAt?: string;
   error?: string;
 }
 
@@ -45,6 +47,8 @@ interface EmailPerformance {
 
 interface EmailData {
   emails: EmailPerformance[];
+  stale?: boolean;
+  updatedAt?: string;
   error?: string;
 }
 
@@ -67,6 +71,13 @@ export function HubspotAnalytics() {
   const [companiesError, setCompaniesError] = useState<string | null>(null);
   const [emailsError, setEmailsError] = useState<string | null>(null);
 
+  const [contactsStale, setContactsStale] = useState(false);
+  const [companiesStale, setCompaniesStale] = useState(false);
+  const [emailsStale, setEmailsStale] = useState(false);
+  const [contactsUpdatedAt, setContactsUpdatedAt] = useState<string | null>(null);
+  const [companiesUpdatedAt, setCompaniesUpdatedAt] = useState<string | null>(null);
+  const [emailsUpdatedAt, setEmailsUpdatedAt] = useState<string | null>(null);
+
   const [subjectFilter, setSubjectFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("openRate");
 
@@ -77,6 +88,8 @@ export function HubspotAnalytics() {
         const json = (await res.json()) as ObjectSummary;
         if (!res.ok) throw new Error(json.error ?? "Request failed");
         setContacts(json);
+        setContactsStale(!!json.stale);
+        setContactsUpdatedAt(json.updatedAt ?? null);
       } catch (err) {
         setContactsError(err instanceof Error ? err.message : "Unknown error");
       } finally {
@@ -89,6 +102,8 @@ export function HubspotAnalytics() {
         const json = (await res.json()) as ObjectSummary;
         if (!res.ok) throw new Error(json.error ?? "Request failed");
         setCompanies(json);
+        setCompaniesStale(!!json.stale);
+        setCompaniesUpdatedAt(json.updatedAt ?? null);
       } catch (err) {
         setCompaniesError(err instanceof Error ? err.message : "Unknown error");
       } finally {
@@ -101,6 +116,8 @@ export function HubspotAnalytics() {
         const json = (await res.json()) as EmailData;
         if (!res.ok) throw new Error(json.error ?? "Request failed");
         setEmails(json.emails);
+        setEmailsStale(!!json.stale);
+        setEmailsUpdatedAt(json.updatedAt ?? null);
       } catch (err) {
         setEmailsError(err instanceof Error ? err.message : "Unknown error");
       } finally {
@@ -136,6 +153,18 @@ export function HubspotAnalytics() {
       <div>
         <h2 className="text-2xl font-bold text-gray-900">HubSpot Analytics</h2>
         <p className="mt-1 text-sm text-gray-600">Contacts, companies, and marketing email performance.</p>
+        {(contactsStale || companiesStale || emailsStale) && (
+          <p className="mt-1 text-sm text-amber-600">
+            Showing cached HubSpot data from{" "}
+            {new Date(
+              [contactsUpdatedAt, companiesUpdatedAt, emailsUpdatedAt]
+                .filter(Boolean)
+                .sort()
+                .reverse()[0] ?? ""
+            ).toLocaleString()}
+            .
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

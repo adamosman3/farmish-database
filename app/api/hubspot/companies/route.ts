@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { getCompaniesSummary } from "@/lib/hubspot";
+import { getCompaniesSummaryCached } from "@/lib/hubspot";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const data = await getCompaniesSummary();
-    return NextResponse.json(data);
+    const { value, stale, updatedAt } = await getCompaniesSummaryCached();
+    return NextResponse.json({ ...value, stale, updatedAt: updatedAt.toISOString() });
   } catch (error) {
     console.error("HubSpot companies error:", error);
     return NextResponse.json(

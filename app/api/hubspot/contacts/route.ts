@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { getContactsSummary } from "@/lib/hubspot";
+import { getContactsSummaryCached } from "@/lib/hubspot";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const data = await getContactsSummary();
-    return NextResponse.json(data);
+    const { value, stale, updatedAt } = await getContactsSummaryCached();
+    return NextResponse.json({ ...value, stale, updatedAt: updatedAt.toISOString() });
   } catch (error) {
     console.error("HubSpot contacts error:", error);
     return NextResponse.json(

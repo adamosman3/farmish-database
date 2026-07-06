@@ -15,6 +15,7 @@ import {
 import { Sprout, CalendarDays, CalendarRange, Archive, AlertCircle, MapPin } from "lucide-react";
 import { MetricCard } from "./metric-card";
 import { ChartCard } from "./chart-card";
+import { DayRangeSelect } from "./day-range-select";
 
 interface Summary {
   createdToday: number;
@@ -45,7 +46,7 @@ interface LabeledCount {
 interface Analytics {
   summary: Summary;
   dailyTrend: TimeBucket[];
-  topLocationsThisWeek: LocationCount[];
+  topLocations: LocationCount[];
   byCategory: LabeledCount[];
   byListingType: LabeledCount[];
   byState: LabeledCount[];
@@ -56,12 +57,17 @@ export function ListingsAnalytics() {
   const [data, setData] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [trendDays, setTrendDays] = useState(30);
+  const [locationDays, setLocationDays] = useState(7);
+  const [categoryDays, setCategoryDays] = useState(30);
 
-  async function load() {
+  async function load(days: number, locDays: number, catDays: number) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/listings");
+      const res = await fetch(
+        `/api/listings?days=${days}&locationDays=${locDays}&categoryDays=${catDays}`
+      );
       const json = (await res.json()) as Analytics;
       if (!res.ok) throw new Error(json.error ?? "Listings request failed");
       setData(json);
@@ -73,8 +79,8 @@ export function ListingsAnalytics() {
   }
 
   useEffect(() => {
-    load();
-  }, []);
+    load(trendDays, locationDays, categoryDays);
+  }, [trendDays, locationDays, categoryDays]);
 
   if (error) {
     return (
@@ -90,7 +96,7 @@ export function ListingsAnalytics() {
     date: d.date.slice(5),
     listings: d.count,
   }));
-  const locationData = (data?.topLocationsThisWeek ?? []).map((l) => ({
+  const locationData = (data?.topLocations ?? []).map((l) => ({
     name: l.location,
     listings: l.count,
   }));
@@ -111,7 +117,10 @@ export function ListingsAnalytics() {
         <MetricCard title="Archived" value={loading ? "…" : (summary?.archived ?? 0).toLocaleString()} icon={Archive} color="amber" />
       </div>
 
-      <ChartCard title="Listings Created (Last 30 Days)">
+      <ChartCard
+        title="Listings Created"
+        action={<DayRangeSelect value={trendDays} onChange={setTrendDays} />}
+      >
         {loading ? (
           <div className="flex h-72 items-center justify-center text-gray-500">Loading trend...</div>
         ) : (
@@ -130,13 +139,16 @@ export function ListingsAnalytics() {
       </ChartCard>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartCard title="Top Locations This Week">
+        <ChartCard
+          title="Top Locations"
+          action={<DayRangeSelect value={locationDays} onChange={setLocationDays} />}
+        >
           {loading ? (
             <div className="flex h-72 items-center justify-center text-gray-500">Loading locations...</div>
           ) : locationData.length === 0 ? (
             <div className="flex h-72 flex-col items-center justify-center text-gray-500">
               <MapPin className="mb-2 h-8 w-8" />
-              No listings created this week yet.
+              No listings created in this period yet.
             </div>
           ) : (
             <div className="h-72">
@@ -153,7 +165,10 @@ export function ListingsAnalytics() {
           )}
         </ChartCard>
 
-        <ChartCard title="Listings by Category">
+        <ChartCard
+          title="Listings by Category"
+          action={<DayRangeSelect value={categoryDays} onChange={setCategoryDays} />}
+        >
           {loading ? (
             <div className="flex h-72 items-center justify-center text-gray-500">Loading categories...</div>
           ) : (

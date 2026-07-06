@@ -1,3 +1,5 @@
+import { withDurableCache, CachedResult } from "./cache";
+
 const HUBSPOT_TOKEN = process.env.HUBSPOT_TOKEN;
 const BASE = "https://api.hubapi.com";
 
@@ -202,17 +204,13 @@ function buildBuckets(trunc: "day" | "week" | "month", days: number | null): { s
   return buckets;
 }
 
-export async function runHubspotCustomQuery(params: {
+async function runHubspotCustomQueryLive(params: {
   group: string;
   metric: string;
   dimension: string;
   range: string;
 }): Promise<CustomResult> {
   requireToken();
-
-  const cacheKey = JSON.stringify(params);
-  const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.at < CACHE_TTL) return cached.data;
 
   const group = CATALOG.find((g) => g.key === params.group);
   if (!group) throw new Error(`Unknown group: ${params.group}`);
@@ -254,7 +252,6 @@ export async function runHubspotCustomQuery(params: {
         rows: Array.from(counts, ([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value),
       };
     }
-    cache.set(cacheKey, { at: Date.now(), data: result });
     return result;
   }
 
@@ -309,6 +306,18 @@ export async function runHubspotCustomQuery(params: {
     };
   }
 
-  cache.set(cacheKey, { at: Date.now(), data: result });
   return result;
+}
+
+// Durable cache with stale-on-error fallback, keyed by the exact query
+// params. If HubSpot rate-limits or times out on a refresh, the widget keeps
+// showing the last successfully fetched result instead of an error.
+export function runHubspotCustomQueryCached(params: {
+  group: string;
+  metric: string;
+  dimension: string;
+  range: string;
+}): Promise<CachedResult<CustomResult>> {
+  const key = `hubspot:custom:${JSON.stringify(params)}`;
+  return withDurableCache(key, CACHE_TTL, () => runHubspotCustomQueryLive(params));
 }

@@ -33,7 +33,7 @@ export interface LabeledCount {
 export interface ListingsAnalytics {
   summary: ListingsSummary;
   dailyTrend: TimeBucket[];
-  topLocationsThisWeek: LocationCount[];
+  topLocations: LocationCount[];
   byCategory: LabeledCount[];
   byListingType: LabeledCount[];
   byState: LabeledCount[];
@@ -81,16 +81,16 @@ export async function getDailyTrend(days = 30): Promise<TimeBucket[]> {
   return rows.map((r) => ({ date: r.day, count: parseInt(r.count, 10) }));
 }
 
-export async function getTopLocationsThisWeek(limit = 10): Promise<LocationCount[]> {
+export async function getTopLocations(days = 7, limit = 10): Promise<LocationCount[]> {
   const rows = await query<{ city: string | null; state: string | null; count: string }>(
     `SELECT city, state, COUNT(*) AS count
      FROM items
-     WHERE created_at >= date_trunc('week', CURRENT_DATE)
+     WHERE created_at >= CURRENT_DATE - ($2::int - 1) * INTERVAL '1 day'
        AND (NULLIF(city, '') IS NOT NULL OR NULLIF(state, '') IS NOT NULL)
      GROUP BY city, state
      ORDER BY count DESC
      LIMIT $1`,
-    [limit]
+    [limit, days]
   );
   return rows.map((r) => ({
     city: r.city,
@@ -100,14 +100,15 @@ export async function getTopLocationsThisWeek(limit = 10): Promise<LocationCount
   }));
 }
 
-export async function getByCategory(limit = 10): Promise<LabeledCount[]> {
+export async function getByCategory(days = 30, limit = 10): Promise<LabeledCount[]> {
   const rows = await query<{ label: string | null; count: string }>(
     `SELECT COALESCE(cached_category_name, 'Uncategorized') AS label, COUNT(*) AS count
      FROM items
+     WHERE created_at >= CURRENT_DATE - ($2::int - 1) * INTERVAL '1 day'
      GROUP BY 1
      ORDER BY count DESC
      LIMIT $1`,
-    [limit]
+    [limit, days]
   );
   return rows.map((r) => ({ label: r.label ?? "Uncategorized", count: parseInt(r.count, 10) }));
 }
@@ -134,13 +135,17 @@ export async function getByState(limit = 15): Promise<LabeledCount[]> {
   return rows.map((r) => ({ label: r.label ?? "Unknown", count: parseInt(r.count, 10) }));
 }
 
-export async function getListingsAnalytics(): Promise<ListingsAnalytics> {
-  const [summary, dailyTrend, topLocationsThisWeek, byCategory, byListingType, byState] =
+export async function getListingsAnalytics(
+  trendDays = 30,
+  locationDays = 7,
+  categoryDays = 30
+): Promise<ListingsAnalytics> {
+  const [summary, dailyTrend, topLocations, byCategory, byListingType, byState] =
     await Promise.all([
       getListingsSummary(),
-      getDailyTrend(30),
-      getTopLocationsThisWeek(10),
-      getByCategory(10),
+      getDailyTrend(trendDays),
+      getTopLocations(locationDays, 10),
+      getByCategory(categoryDays, 10),
       getByListingType(),
       getByState(15),
     ]);
@@ -148,7 +153,7 @@ export async function getListingsAnalytics(): Promise<ListingsAnalytics> {
   return {
     summary,
     dailyTrend,
-    topLocationsThisWeek,
+    topLocations,
     byCategory,
     byListingType,
     byState,

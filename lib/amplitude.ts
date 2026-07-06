@@ -8,6 +8,7 @@ export interface AmplitudeEventDefinition {
   name: string;
   display: string;
   value: string;
+  total?: number;
 }
 
 export interface EventVolumePoint {
@@ -135,6 +136,7 @@ export async function fetchAmplitudeEventDefinitions(): Promise<AmplitudeEventDe
     name: string;
     display: string;
     value: string;
+    totals: number;
     hidden: boolean;
     deleted: boolean;
     non_active: boolean;
@@ -142,7 +144,7 @@ export async function fetchAmplitudeEventDefinitions(): Promise<AmplitudeEventDe
 
   return rows
     .filter((d) => !d.hidden && !d.deleted && !d.non_active)
-    .map((d) => ({ id: d.id, name: d.name, display: d.display, value: d.value }));
+    .map((d) => ({ id: d.id, name: d.name, display: d.display, value: d.value, total: d.totals }));
 }
 
 // Run async tasks with a bounded concurrency to avoid rate limits.
@@ -195,22 +197,16 @@ export async function fetchAmplitudeVolume(
   }));
   const total = activeData.seriesCollapsed?.[0]?.[0]?.value ?? daily.reduce((s, d) => s + d.count, 0);
 
-  // 2) Per-event totals for the breakdown (single bucket per event).
+  // 2) Top events breakdown.
+  // The events/list endpoint already returns historical totals per event, so
+  // we can rank the top N directly without making one segmentation call per
+  // event. This reduces the Amplitude cold-start from ~40 API calls to just 2.
   const definitions = await fetchAmplitudeEventDefinitions();
-  const perEvent = await mapWithConcurrency(definitions, 8, async (def) => {
-    try {
-      const d = await segmentation(def.name, start, end, 30);
-      const eventTotal = d.seriesCollapsed?.[0]?.[0]?.value ?? 0;
-      return { name: def.display || def.name, total: eventTotal } as EventTotal;
-    } catch {
-      return { name: def.display || def.name, total: 0 } as EventTotal;
-    }
-  });
-
-  const topEvents = perEvent
-    .filter((e) => e.total > 0)
-    .sort((a, b) => b.total - a.total)
-    .slice(0, topEventLimit);
+  const topEvents = definitions
+    .filter((d) => (d.total ?? 0) > 0)
+    .sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
+    .slice(0, topEventLimit)
+    .map((d): EventTotal => ({ name: d.display || d.name, total: d.total ?? 0 }));
 
   const value: AmplitudeVolume = { total, daily, topEvents };
   volumeCache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, value });
@@ -218,9 +214,8 @@ export async function fetchAmplitudeVolume(
 }
 
 // Durable, cross-instance cache with stale-on-error fallback. If a live
-// Amplitude fetch fails or times out (this endpoint makes ~1 call per active
-// event type, so it's the most timeout-prone data source in the app), the
-// dashboard serves the last successfully fetched volume instead of an error.
+// Amplitude fetch fails or times out, the dashboard serves the last
+// successfully fetched volume instead of an error.
 const DURABLE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
 export async function getAmplitudeVolumeCached(

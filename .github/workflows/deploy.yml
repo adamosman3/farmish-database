@@ -18,4 +18,14 @@ jobs:
       steps:
         - uses: actions/checkout@v6
         - uses: superfly/flyctl-actions/setup-flyctl@master
+        - name: Sync Amplitude secrets to Fly
+          if: ${{ vars.SKIP_SECRET_SYNC != 'true' }}
+          run: |
+            if [ -n "${{ secrets.AMPLITUDE_API_KEY }}" ] && [ -n "${{ secrets.AMPLITUDE_SECRET_KEY }}" ]; then
+              flyctl secrets set --stage \
+                AMPLITUDE_API_KEY="${{ secrets.AMPLITUDE_API_KEY }}" \
+                AMPLITUDE_SECRET_KEY="${{ secrets.AMPLITUDE_SECRET_KEY }}"
+            else
+              echo "AMPLITUDE_API_KEY/AMPLITUDE_SECRET_KEY repo secrets not set; skipping sync."
+            fi
         - run: flyctl deploy --remote-only

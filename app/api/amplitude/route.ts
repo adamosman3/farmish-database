@@ -25,8 +25,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ ...volume, stale: false, updatedAt: new Date().toISOString() });
   } catch (error) {
     console.error("Amplitude API error:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    const missingCreds = !process.env.AMPLITUDE_API_KEY || !process.env.AMPLITUDE_SECRET_KEY;
     return NextResponse.json(
-      { error: "Failed to fetch Amplitude data", details: String(error) },
+      {
+        error: missingCreds
+          ? "Amplitude credentials are not configured on this server"
+          : `Amplitude fetch failed: ${message}`,
+      },
       { status: 500 }
     );
   }

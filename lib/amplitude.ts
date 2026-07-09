@@ -189,24 +189,45 @@ export async function fetchAmplitudeVolume(
     return cached.value;
   }
 
-  // 1) Aggregate daily volume across all active events.
-  const activeData = await segmentation("_active", start, end, 1);
-  const daily: EventVolumePoint[] = (activeData.xValues ?? []).map((date, i) => ({
-    date,
-    count: activeData.series?.[0]?.[i] ?? 0,
-  }));
-  const total = activeData.seriesCollapsed?.[0]?.[0]?.value ?? daily.reduce((s, d) => s + d.count, 0);
+  // The two Amplitude calls are independent, so run them in parallel and
+  // tolerate one of them failing: partial data beats a fully blank dashboard.
+  // 1) Aggregate daily volume across all active events (segmentation).
+  // 2) Top events breakdown ranked by the historical totals that events/list
+  //    already returns, so no per-event segmentation calls are needed.
+  const [activeResult, defsResult] = await Promise.allSettled([
+    segmentation("_active", start, end, 1),
+    fetchAmplitudeEventDefinitions(),
+  ]);
 
-  // 2) Top events breakdown.
-  // The events/list endpoint already returns historical totals per event, so
-  // we can rank the top N directly without making one segmentation call per
-  // event. This reduces the Amplitude cold-start from ~40 API calls to just 2.
-  const definitions = await fetchAmplitudeEventDefinitions();
-  const topEvents = definitions
-    .filter((d) => (d.total ?? 0) > 0)
-    .sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
-    .slice(0, topEventLimit)
-    .map((d): EventTotal => ({ name: d.display || d.name, total: d.total ?? 0 }));
+  if (activeResult.status === "rejected" && defsResult.status === "rejected") {
+    throw activeResult.reason instanceof Error
+      ? activeResult.reason
+      : new Error(String(activeResult.reason));
+  }
+
+  let daily: EventVolumePoint[] = [];
+  let total = 0;
+  if (activeResult.status === "fulfilled") {
+    const activeData = activeResult.value;
+    daily = (activeData.xValues ?? []).map((date, i) => ({
+      date,
+      count: activeData.series?.[0]?.[i] ?? 0,
+    }));
+    total = activeData.seriesCollapsed?.[0]?.[0]?.value ?? daily.reduce((s, d) => s + d.count, 0);
+  } else {
+    console.error("Amplitude segmentation failed, serving top events only:", activeResult.reason);
+  }
+
+  let topEvents: EventTotal[] = [];
+  if (defsResult.status === "fulfilled") {
+    topEvents = defsResult.value
+      .filter((d) => (d.total ?? 0) > 0)
+      .sort((a, b) => (b.total ?? 0) - (a.total ?? 0))
+      .slice(0, topEventLimit)
+      .map((d): EventTotal => ({ name: d.display || d.name, total: d.total ?? 0 }));
+  } else {
+    console.error("Amplitude events/list failed, serving volume only:", defsResult.reason);
+  }
 
   const value: AmplitudeVolume = { total, daily, topEvents };
   volumeCache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, value });
@@ -222,6 +243,8 @@ export async function getAmplitudeVolumeCached(
   days: number,
   topEventLimit = 10
 ): Promise<CachedResult<AmplitudeVolume>> {
+  startBackgroundWarmer();
+
   const end = new Date();
   const start = new Date();
   start.setDate(end.getDate() - (days - 1));
@@ -233,4 +256,31 @@ export async function getAmplitudeVolumeCached(
     DURABLE_TTL_MS,
     () => fetchAmplitudeVolume(startStr, endStr, topEventLimit)
   );
+}
+
+// Background cache warmer. The app runs as a long-lived server (not
+// serverless), so we proactively refresh the durable cache for the common
+// day ranges every 10 minutes. Users then almost always hit a warm cache
+// and never wait on (or get errors from) live Amplitude calls.
+const WARM_INTERVAL_MS = 10 * 60 * 1000;
+const WARM_DAY_RANGES = [7, 30, 90];
+let warmerStarted = false;
+
+function startBackgroundWarmer() {
+  if (warmerStarted) return;
+  warmerStarted = true;
+
+  const warm = async () => {
+    for (const days of WARM_DAY_RANGES) {
+      try {
+        await getAmplitudeVolumeCached(days);
+      } catch (err) {
+        console.error(`[amplitude-warmer] refresh failed for ${days}d:`, err);
+      }
+    }
+  };
+
+  const timer = setInterval(warm, WARM_INTERVAL_MS);
+  // Don't keep the process alive just for the warmer.
+  if (typeof timer.unref === "function") timer.unref();
 }
